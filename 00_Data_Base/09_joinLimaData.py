@@ -34,6 +34,7 @@ import sqlite3
 # Third-party library imports
 import pandas as pd
 from loguru import logger
+import zipfile
 
 # Local application/library specific imports
 from vars import table_lastfm, table_spotify, file_db, folder_input, csv_lima
@@ -71,8 +72,12 @@ def main():
     logger.success(f"Connection to the Database {file_db} initiated successfully.") 
 
     # Read data from CSV and SQL tables
-    logger.info(f"Reading data from {csv_lima}")
-    df = pd.read_csv(f"{folder_input}/{csv_lima}")
+    logger.info(f"Reading data from {csv_lima}.zip")
+    with zipfile.ZipFile(f"{folder_input}/{csv_lima}.zip", 'r') as z:
+
+        with z.open(f"{csv_lima}.csv") as f:
+            df = pd.read_csv(f)
+
     logger.info(f"Reading data from {table_spotify} where songFound is True")
     df_sp = pd.read_sql_query(f"SELECT * FROM {table_spotify} WHERE songFound = 'True'", sqlite_connection)
     logger.info(f"Reading data from {table_lastfm} where songFound is True")
