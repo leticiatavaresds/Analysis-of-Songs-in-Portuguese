@@ -1,184 +1,52 @@
 #!/usr/bin/env python3.9
-# Import libraries
+# -*- coding: utf-8 -*-
+"""
+Author: Letícia Tavares
+Date: 2024-08-05
+Description:
+    This script interacts with the Spotify API and Genius API to search for song information based on
+    song titles and artist names. It performs two types of searches:
+    1. By track ID: Retrieves detailed information about a specific track using its Spotify ID.
+    2. By name: Searches for tracks by name and artist, returning relevant information such as track ID,
+       artist ID and release date.
+    
+    The script also updates the local SQLite database with the search results. It handles various scenarios
+    including errors and low similarity matches, and performs database operations to ensure that song
+    information is correctly recorded and updated.
+
+Usage:
+    1. Ensure all dependencies are installed.
+    2. Configure Genius API credentials in the file Data_Input/kaggle_genius.json.
+    3. Configure Spotify API credentials in the file Data_Input/spotify_genius.json.
+    4. Ensure that the database exists (created by script 01 and filtered by 02), If it does not exist, run script 02. 
+        This script will search for all 5 million songs in the Genius database.
+    5. Run the script to start the search and update process: python 03_searchSpotify.py
+
+Note:
+    - The script uses global variables for API credentials and configuration.
+    - Error handling is included to manage interruptions and API errors.
+
+"""
+
+# Standard library imports
 import datetime as dt
-import numpy as np
-import os 
-import pandas as pd
-import requests
 import sqlite3
 import time
-import re
-from unidecode import unidecode
-from datetime import timedelta
 from difflib import SequenceMatcher
-import json
+
+# Third-party library imports
+import numpy as np
+import pandas as pd
+import requests
 from loguru import logger
-from lyricsgenius import Genius
-from time import strftime, localtime
 from tqdm import tqdm
-from multiset import Multiset
-from textdistance import damerau_levenshtein
+from unidecode import unidecode
 
-table_genius = "tblGeniusSongsLyrics"
-table_spotify =  "tblSongsSpotify"
-file_db = "geniusSongsLyrics.db"
-
-f = open('genius_credentials.json')
-data = json.load(f)
-genius_key = data['key']
-genius = Genius(genius_key)
-
-# Open Spotify Credentials 
-with open("spotify_credentials.json") as test:
-    dict_credenctials_sp = json.load(test)
-
-dict_credenctials_sp = {int(k): value for k, value in dict_credenctials_sp.items()}
-credential = 0
-
-os.environ['SPOTIPY_REDIRECT_URI'] = "http://localhost:8888/tree"
-
-def spotifyAccessToken(client_id, client_secret):
-
-    AUTH_URL = 'https://accounts.spotify.com/api/token'
-    
-    # Get access token from Spotify API
-    auth_response = requests.post(AUTH_URL, {
-                                            'grant_type': 'client_credentials',
-                                            'client_id': client_id,
-                                            'client_secret': client_secret,
-                                        })
-
-    # Save the access token
-    access_token = auth_response.json()['access_token']
-
-    # Return access token
-    return access_token
-
-def solveError(error):
-
-    global dict_credenctials_sp, credential
-
-    # 429 error indicates that app has reached the Web API rate limit
-    # So change to another credential for get a new access token
-    if error == "429":
-        credential += 1
-
-    index = credential % len(dict_credenctials_sp)   
-
-    client_id = dict_credenctials_sp[index]["client_id"]
-    client_secret = dict_credenctials_sp[index]["client_secret"]
-
-    # Get new access token
-    access_token = spotifyAccessToken(client_id, client_secret)
-
-    # Return access token
-    return access_token
-
-def processResponse(response, url, params):
-
-    global access_token, dict_credenctials_sp
-
-    status_code = str(response.status_code)
+# Local application/library specific imports
+import functions
+from vars import file_db, table_genius, table_spotify
 
 
-
-    # If error is equal to 401 or 429, try another credentials
-    if status_code == "401" or status_code == "429":
-
-        for i in range (len(dict_credenctials_sp)):
-
-            # Get new access token
-            access_token = solveError(status_code)
-
-            header = {
-                'Authorization': f'Bearer {access_token}'}
-            
-            # Try to get a new response with new access token
-            response = requests.get(url,  params = params, header = header, timeout=15)
-            status_code = str(response.status_code)
-
-            # If status is diferent from erros 401 or 4029, stop trying other credentials
-            if status_code != "401" and status_code != "429":
-                break
-
-            # If all the credential gets en error, inform that is necessary wait some hour to run the code again and exit the application
-            if i == (len(dict_credenctials_sp) - 1):
-                logger.error(f"Currently all credentials are showing authorization error 429. Wait 14 hours and then run this code again.")
-                exit()
-
-    # If response has no errors, return the response json
-    if status_code == "200":
-        response = response.json()
-    
-    # Else return a dict containing the error
-    else:
-        response = {"error": status_code}
-
-    return response
-
-
-def tokenizeText(txt):
-    
-    # Convert a phrase into a count of bigram tokens of its words
-    arr = []
-    for wrd in txt.lower().split('  '):
-        arr += ([wrd] if len(wrd) == 1 else [wrd[i:i+2]
-                for i in range(len(wrd)-1)])
-        
-    return Multiset(arr)
-
-def sorensonDice(text1, text2):
-    
-    # Sorenson-Dice similarity of Multisets
-    text1, text2 = tokenizeText(text1), tokenizeText(text2)
-    dice = 2 * len(text1 & text2) / (len(text1) + len(text2))
-
-    return dice
-
-def cleanString(text):
-
-    # Remove the accents
-    text = unidecode(text)
-
-    text = text.replace(" & ", " e ")
-
-    # Remove special characters
-    text = re.sub('[^a-zA-Z0-9]', ' ', text)
-
-    # Remove space at the beginning of the string and at the end
-    text = text.strip()
-
-    # Remove multiple spaces
-    text = re.sub(' +', ' ', text)
-
-    # Convert all uppercase characters in a string into lowercase characters 
-    text = text.lower()
-    
-    return text
-
-def getMatchSimilarity(str1, str2):
-
-    # Clean the Strings
-    # str1, str2 = cleanString(str1), cleanString(str2)
-
-    # Calculate the Soreson Dice 
-    dice_sim = sorensonDice(str1, str2)
-    
-    # Calculate the Damerau Lavenshtein distance
-    lv_sim = damerau_levenshtein.normalized_similarity(str1, str2)
-
-    # Set the weights
-    dice_weight = 0.8
-    lv_weight = 1 - dice_weight
-
-    # Calculate the Score
-    score =  (lv_sim * lv_weight) + (dice_sim * dice_weight)
-
-    return {
-        'dice': dice_sim,
-        'lv': lv_sim,
-        'score': score
-    }
 
 def spotifySearch(name, artist):
 
@@ -199,7 +67,7 @@ def spotifySearch(name, artist):
     response = requests.get(url,  params=params, headers=header, timeout=15)
 
     # Check if response contains no errors
-    response = processResponse(response, url, params)
+    response = functions.processResponse(response, url, params)
 
     # Return response as a dict
     return response
@@ -218,7 +86,7 @@ def spotifyGetTrack(id):
     response = requests.get(url, headers = header, timeout = 15)
 
     # Check if response contains no errors
-    response = processResponse(response, url, None)
+    response = functions.processResponse(response, url, None)
 
     # Return response as a dict
     return response
@@ -289,20 +157,20 @@ def searchSongSpotifyByName(song, artist, feats, year_genius):
                 diff_years = abs(ano - year_genius)
 
 
-        artist_name = cleanString(artist_name)
-        artistClean = cleanString(artist)
-        song_name = cleanString(song_name)
-        song = cleanString(song)    
+        artist_name = functions.cleanString(artist_name)
+        artistClean = functions.cleanString(artist)
+        song_name = functions.cleanString(song_name)
+        song = functions.cleanString(song)    
 
      
         # Get the distance between the artist name from spotify and Genius 
-        similarity_artist = getMatchSimilarity(artist_name, artistClean)["score"]
+        similarity_artist = functions.getMatchSimilarity(artist_name, artistClean)["score"]
 
     
         if similarity_artist < 1 and " & " in artist:
             artists = artist.upper().split(" & ")
             artistsStr = unidecode(", ".join(sorted(artists)))            
-            new_similarity = getMatchSimilarity(artistsStr, all_artistsStr)["score"]
+            new_similarity = functions.getMatchSimilarity(artistsStr, all_artistsStr)["score"]
             
             
 
@@ -311,14 +179,14 @@ def searchSongSpotifyByName(song, artist, feats, year_genius):
 
             if new_similarity < 1:
                 firstArtist = artist.upper().split(" & ")[0].split(",")[0]
-                new_similarity = getMatchSimilarity(cleanString(firstArtist), artist_name)["score"]
+                new_similarity = functions.getMatchSimilarity(functions.cleanString(firstArtist), artist_name)["score"]
 
                
                 if new_similarity > similarity_artist:
                     similarity_artist = new_similarity
 
         # Get the distance between the song name from spotify and Genius  
-        similarity_title = getMatchSimilarity(song_name, song)["score"]
+        similarity_title = functions.getMatchSimilarity(song_name, song)["score"]
 
 
         similarity_allArtist = SequenceMatcher(None, feats.upper(), all_artistsStr.upper()).ratio()
@@ -399,18 +267,18 @@ def searchSongSpotifyById(id_spotify, song, artist,feats, year_genius):
             diff_years = abs(ano - year_genius)
 
     # Clean the strings 
-    artist_name = cleanString(artist_name)
-    artist = cleanString(artist)
-    song_name = cleanString(song_name)
-    song = cleanString(song)    
+    artist_name = functions.cleanString(artist_name)
+    artist = functions.cleanString(artist)
+    song_name = functions.cleanString(song_name)
+    song = functions.cleanString(song)    
 
     # Get the distance between the artist name from spotify and Genius 
-    similarity_artist = getMatchSimilarity(artist_name, artist)["score"]
+    similarity_artist = functions.getMatchSimilarity(artist_name, artist)["score"]
 
     if similarity_artist < 1 and " & " in artist:
-        artists = artist.upper().split(" & ")        
+        artistsStr = artist.upper().split(" & ")        
         all_artistsStr = unidecode(", ".join(sorted(all_artists)))
-        new_similarity = getMatchSimilarity(artistsStr, all_artistsStr)["score"]
+        new_similarity = functions.getMatchSimilarity(artistsStr, all_artistsStr)["score"]
         
 
         if new_similarity > similarity_artist:
@@ -418,14 +286,14 @@ def searchSongSpotifyById(id_spotify, song, artist,feats, year_genius):
 
         if new_similarity < 1:
             firstArtist = artist.upper().split(" & ")[0].split(",")[0]
-            new_similarity = getMatchSimilarity(cleanString(firstArtist), artist_name)["score"]
+            new_similarity = functions.getMatchSimilarity(functions.cleanString(firstArtist), artist_name)["score"]
             
 
             if new_similarity > similarity_artist:
                 similarity_artist = new_similarity
 
     # Get the distance between the song name from spotify and Genius  
-    similarity_title = getMatchSimilarity(song_name, song)["score"]
+    similarity_title = functions.getMatchSimilarity(song_name, song)["score"]
 
     similarity_allArtist = SequenceMatcher(None, feats.upper(), all_artistsStr.upper()).ratio()
 
@@ -446,6 +314,41 @@ def searchSongSpotifyById(id_spotify, song, artist,feats, year_genius):
     # Return the song data
     return dict_track
 
+def createTable(table_spotify, table_genius, sqlite_connection, cursor, dict_columns):
+
+    # Create spotify table from Genius table selecting only some columns
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {table_spotify} AS
+            SELECT id       AS idGenius, 
+                   title    AS titleGenius, 
+                   artist   AS artistGenius, 
+                   year     AS yearGenius,  
+                   features AS featuresGenius  
+            FROM {table_genius};""")
+
+    sqlite_connection.commit()
+
+    # Dictionary containing new columns names for the spotify table and their respective types
+    dict_columns = {
+        "title": "TEXT",
+        "artist": "TEXT",
+        "id": "TEXT",
+        "artistId": "TEXT",
+        "isrc": "TEXT",
+        "explicit": "INTEGER",
+        "similarityTitle": "REAL",
+        "similarityArtist": "REAL",
+        "diffYears": "REAL",
+        "songFound": "TEXT",
+        "releaseDate": "TEXT"
+        }
+    
+
+    # For each column in dictionary, create the column in the table
+    for column, type in dict_columns.items():
+        cursor.execute(f"ALTER TABLE {table_spotify} ADD COLUMN {column} '{type}'")
+
+    sqlite_connection.commit()
 
 def dfIntoTable(table_name, df, sqlite_connection):
 
@@ -546,14 +449,6 @@ def createTable(table_spotify, table_genius, sqlite_connection, cursor):
         cursor.execute(f"ALTER TABLE {table_spotify} ADD COLUMN {column} '{type}'")
 
     sqlite_connection.commit()
-
-def secondsToStr(elapsed=None):
-
-    # Convert seconds to string in the format "days hours:minutes:seconds"
-    if elapsed is None:
-        return strftime("%d %H:%M:%s", localtime())
-    else:
-        return str(timedelta(seconds=elapsed))
     
 
 def searchSongsSpotify(df, len_df, sqlite_connection):
@@ -733,7 +628,7 @@ def main():
 
 
     # Get Spotify API access token
-    access_token = spotifyAccessToken(dict_credenctials_sp[credential]["client_id"], 
+    access_token = functions.spotifyAccessToken(dict_credenctials_sp[credential]["client_id"], 
                                     dict_credenctials_sp[credential]["client_secret"]) 
 
 
@@ -741,7 +636,8 @@ def main():
     df = pd.read_sql_query(f"SELECT * FROM {table_spotify} WHERE (songFound != 'False' AND songFound != 'True') OR songFound IS NULL", 
                         sqlite_connection)
     
-    len_df = len(df) 
+    # len_df = len(df) 
+    len_df = 100
     logger.info(f"Table {table_spotify} read successfully, there are {len_df} songs to search.")  
 
     logger.debug(f"Searching for songs on the Spotify database...")
@@ -752,7 +648,7 @@ def main():
 
     # Get time of search execution
     time_exec = time.time() - start
-    time_exec = secondsToStr(time_exec)
+    time_exec = functions.secondsToStr(time_exec)
 
     logger.success(f"Search completed successfully.")   
 
@@ -785,4 +681,14 @@ def main():
 
     logger.success(f"Connection to Database {file_db} closed.")
 
-main()
+if __name__ == "__main__":
+
+    genius = functions.getGenius()
+    dict_credenctials_sp = functions.getSpotifyDict()
+    credential = 0
+    
+    # Start the application
+    main()
+
+    # Exit the application
+    exit()

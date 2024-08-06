@@ -1,116 +1,46 @@
 #!/usr/bin/env python3.9
-# Import libraries
-import numpy as np
-import os 
-import pandas as pd
-import requests
+# -*- coding: utf-8 -*-
+"""
+Author: Letícia Tavares
+Date: 2024-08-05
+Description:
+    This script retrieves audio features for tracks from Spotify and updates the local SQLite database with the fetched data.
+    It performs the following tasks:
+    1. Connects to the SQLite database.
+    2. Creates a table for storing Spotify audio features if it does not already exist.
+    3. Retrieves an access token for the Spotify API.
+    4. Queries the database for tracks that do not have audio features and retrieves their audio features from Spotify.
+    5. Updates the database with the fetched audio features.
+    6. Logs the number of tracks successfully found and the number of tracks not found, along with the execution time.
+
+
+Usage:
+    1. Ensure all dependencies are installed and accessible.
+    2. Configure Spotify API credentials in the file Data_Input/spotify_genius.json.
+    3. Have run script 03 before this.
+    4. Run the script: python 08_getAudioFeatures.py
+
+Note:
+    - The script uses logging to track progress and errors.
+    - A progress bar is used to show the status of the fetching process.
+    - Temporary tables are used during execution to update the main table.
+
+"""
+
+
+# Standard library imports
 import sqlite3
 import time
 
-from datetime import timedelta
-import json
+# Third-party library imports
+import pandas as pd
+import requests
 from loguru import logger
-from lyricsgenius import Genius
-from time import strftime, localtime
 from tqdm import tqdm
 
-
-table_genius = "tblGeniusSongsLyrics"
-table_spotify =  "tblSongsSpotify"
-table_spotify_audio_feats =  "tblSongsAudioFeatures"
-file_db = "geniusSongsLyrics.db"
-
-genius = Genius("8D99r3wilswsV3P-jVo0MPsmYG7x066DEQ0VPBphmUmq5ckHvqCoeny9Nbik7G8L")
-
-# Open Spotify Credentials file
-with open("spotify_credentials.json") as test:
-    dict_credenctials_sp = json.load(test)
-
-dict_credenctials_sp = {int(k): value for k, value in dict_credenctials_sp.items()}
-credential = 0
-
-os.environ['SPOTIPY_REDIRECT_URI'] = "http://localhost:8888/tree"
-
-def spotifyAccessToken(client_id, client_secret):
-
-    AUTH_URL = 'https://accounts.spotify.com/api/token'
-    
-    # Get access token from Spotify API
-    auth_response = requests.post(AUTH_URL, {
-                                            'grant_type': 'client_credentials',
-                                            'client_id': client_id,
-                                            'client_secret': client_secret,
-                                        })
-
-    # Save the access token
-    access_token = auth_response.json()['access_token']
-
-    # Return access token
-    return access_token
-
-def solveError(error):
-
-    global dict_credenctials_sp, credential
-
-    # 429 error indicates that app has reached the Web API rate limit
-    # So change to another credential for get a new access token
-    if error == "429":
-        credential += 1
-
-    index = credential % len(dict_credenctials_sp)   
-
-    client_id = dict_credenctials_sp[index]["client_id"]
-    client_secret = dict_credenctials_sp[index]["client_secret"]
-
-    # Get new access token
-    access_token = spotifyAccessToken(client_id, client_secret)
-
-    # Return access token
-    return access_token
-
-def processResponse(response, url, params):
-
-    global access_token, dict_credenctials_sp
-
-    status_code = str(response.status_code)
-
-    # If error is equal to 401 or 429, try another credentials
-    if status_code == "401" or status_code == "429":
-
-        for i in range (len(dict_credenctials_sp)):
-
-            logger.info(f"Trying credential {i}.")
-
-            # Get new access token
-            access_token = solveError(status_code)
-
-            header = {
-                'Authorization': f'Bearer {access_token}'}
-            
-            # Try to get a new response with new access token
-            response = requests.get(url,  params = params, headers = header, timeout=15)
-            status_code = str(response.status_code)
-
-            # If status is diferent from erros 401 or 4029, stop trying other credentials
-            if status_code != "401" and status_code != "429":
-                break
-
-            logger.error(f"{response.status_code} - {response.reason}")
-
-            # If all the credential gets en error, inform that is necessary wait some hour to run the code again and exit the application
-            if i == (len(dict_credenctials_sp) - 1):
-                logger.error(f"Currently all credentials are showing authorization error 429. Wait 14 hours and then run this code again.")
-                exit()
-
-    # If response has no errors, return the response json
-    if status_code == "200":
-        response = response.json()
-    
-    # Else return a dict containing the error
-    else:
-        response = {"error": status_code}
-
-    return response
+# Local application/library specific imports
+import functions
+from vars import table_spotify, file_db, table_spotify_audio_feats
 
 
 def spotifyGetTracksResponse(endpoint, listIds):
@@ -127,7 +57,7 @@ def spotifyGetTracksResponse(endpoint, listIds):
     response = requests.get(url, headers=header, timeout = 15)
     
     # Check if response contains no errors
-    response = processResponse(response, url, None)
+    response = functions.processResponse(response, url, None)
 
     # Return response as a dict
     return response
@@ -206,14 +136,6 @@ def createTable(table_spotify_audio_feat, table_spotify, sqlite_connection, curs
         cursor.execute(f"ALTER TABLE {table_spotify_audio_feat} ADD COLUMN {column} '{type}'")
 
     sqlite_connection.commit()
-
-def secondsToStr(elapsed=None):
-
-    # Convert seconds to string in the format "days hours:minutes:seconds"
-    if elapsed is None:
-        return strftime("%d %H:%M:%s", localtime())
-    else:
-        return str(timedelta(seconds=elapsed))
     
 
 def Get_Musics(tracks_id):
@@ -297,7 +219,7 @@ def main():
 
 
     # Get Spotify API access token
-    access_token = spotifyAccessToken(dict_credenctials_sp[credential]["client_id"], 
+    access_token = functions.spotifyAccessToken(dict_credenctials_sp[credential]["client_id"], 
                                     dict_credenctials_sp[credential]["client_secret"]) 
 
 
@@ -329,7 +251,7 @@ def main():
 
     # Get time of search execution
     time_exec = time.time() - start
-    time_exec = secondsToStr(time_exec)
+    time_exec = functions.secondsToStr(time_exec)
 
     logger.success(f"Search completed successfully.")   
 
@@ -353,6 +275,10 @@ def main():
     logger.success(f"Connection to Database {file_db} closed.")
 
 if __name__ == "__main__":
+
+    genius = functions.getGenius()
+    dict_credenctials_sp = functions.getSpotifyDict()
+    credential = 0
     
     # Start the application
     main()

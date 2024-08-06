@@ -1,46 +1,49 @@
 #!/usr/bin/env python3.9
-# Import libraries
-import pandas as pd
-import requests
+# -*- coding: utf-8 -*-
+"""
+Author: Letícia Tavares
+Date: 2024-08-05
+Description:
+    This script interacts with the Last.fm API to update song information in a local SQLite database.
+    The script performs the following tasks:
+    1. Connects to the SQLite database.
+    2. Creates or updates a table in the database to store song information from Last.fm.
+    3. Retrieves song data from Last.fm using the API based on the information from the Spotify table.
+    4. Processes and cleans the data, calculates similarity scores for song titles and artists.
+    5. Updates the database with the retrieved Last.fm data.
+    6. Logs progress and status updates throughout the execution.
+    7. Displays a summary of the search performance.
+
+Usage:
+    1. Ensure all dependencies are installed and accessible.
+    2. Configure Last.fm API credentials in the file Data_Input/lastfm_credentials.json.
+    3. Have run scripts 03 before this, this script only search for songs found in the spotify database.
+    4. Run the script: python 05_searchLastFm.py
+
+Note:
+    - The script uses logging to track progress and errors.
+    - Temporary tables are created and dropped during execution.
+    - Database connections are managed within the script.
+    - The progress bar updates with each processed song.
+
+"""
+
+
+
+# Standard library imports
 import sqlite3
 import time
-import json
 
-from datetime import timedelta
-from difflib import SequenceMatcher
+# Third-party library imports
+import pandas as pd
+import requests
 from loguru import logger
-from lyricsgenius import Genius
-from time import localtime, sleep, strftime
 from tqdm import tqdm
 
-import re
-from unidecode import unidecode
-from multiset import Multiset
-from textdistance import damerau_levenshtein
+# Local application/library specific imports
+import functions
+from vars import table_spotify, table_lastfm, file_db
 
-f = open('genius_credentials.json')
-data = json.load(f)
-genius_key = data['key']
-genius = Genius(genius_key)
-
-f = open('lastfm_credentials.json')
-data = json.load(f)
-user_agent = data['user_agent']
-api_key = data['api_key']
-
-table_genius = "tblGeniusSongsLyrics"
-table_spotify =  "tblSongsSpotify"
-table_lastfm =  "tblSongsLastFm"
-file_db = "geniusSongsLyrics.db"
-
-
-def secondsToStr(elapsed=None):
-
-    # Convert seconds to string in the format "days hours:minutes:seconds"
-    if elapsed is None:
-        return strftime("%d %H:%M:%s", localtime())
-    else:
-        return str(timedelta(seconds=elapsed))
 
 def createTable(table_lastfm, table_spotify, sqlite_connection, cursor):
     
@@ -127,10 +130,10 @@ def updateSongFound(table_name, song_id, status, sqlite_connection):
 def dfIntoTable(table_name, df, sqlite_connection):
 
     # Drop temporary table if exists
-    sqlite_connection.execute('DROP TABLE IF EXISTS temporary_table_genius')  
+    sqlite_connection.execute('DROP TABLE IF EXISTS temporary_table_fm')  
 
     # Create temporary table containing the dataframe data
-    df.to_sql('temporary_table_genius', sqlite_connection) 
+    df.to_sql('temporary_table_fm', sqlite_connection) 
     
     # Join the temporary table to the the table using the idGenius as key
     sqlite_connection.execute(f"""
@@ -142,76 +145,14 @@ def dfIntoTable(table_name, df, sqlite_connection):
             similarityArtist = temp.similarityArtist,
             tags = temp.tags,
             songFound = temp.songFound
-        FROM temporary_table_genius AS temp 
+        FROM temporary_table_fm AS temp 
         WHERE {table_name}.idGenius = temp.idGenius;
         """)   
        
     # Drop temporary table if exists
-    sqlite_connection.execute('DROP TABLE temporary_table_genius')  
+    sqlite_connection.execute('DROP TABLE temporary_table_fm')  
     sqlite_connection.commit()
 
-def tokenizeText(txt):
-    
-    # Convert a phrase into a count of bigram tokens of its words
-    arr = []
-    for wrd in txt.lower().split('  '):
-        arr += ([wrd] if len(wrd) == 1 else [wrd[i:i+2]
-                for i in range(len(wrd)-1)])
-        
-    return Multiset(arr)
-
-def sorensonDice(text1, text2):
-    
-    # Sorenson-Dice similarity of Multisets
-    text1, text2 = tokenizeText(text1), tokenizeText(text2)
-    dice = 2 * len(text1 & text2) / (len(text1) + len(text2))
-
-    return dice
-
-def cleanString(text):
-
-    # Remove the accents
-    text = unidecode(text)
-
-    text = text.replace(" & ", " e ")
-
-    # Remove special characters
-    text = re.sub('[^a-zA-Z0-9]', ' ', text)
-
-    # Remove space at the beginning of the string and at the end
-    text = text.strip()
-
-    # Remove multiple spaces
-    text = re.sub(' +', ' ', text)
-
-    # Convert all uppercase characters in a string into lowercase characters 
-    text = text.lower()
-    
-    return text
-
-def getMatchSimilarity(str1, str2):
-
-    # Clean the Strings
-    # str1, str2 = cleanString(str1), cleanString(str2)
-
-    # Calculate the Soreson Dice 
-    dice_sim = sorensonDice(str1, str2)
-    
-    # Calculate the Damerau Lavenshtein distance
-    lv_sim = damerau_levenshtein.normalized_similarity(str1, str2)
-
-    # Set the weights
-    dice_weight = 0.8
-    lv_weight = 1 - dice_weight
-
-    # Calculate the Score
-    score =  (lv_sim * lv_weight) + (dice_sim * dice_weight)
-
-    return {
-        'dice': dice_sim,
-        'lv': lv_sim,
-        'score': score
-    }
 
 def searchSongsGenius(df, len_df, sqlite_connection):
 
@@ -268,19 +209,19 @@ def searchSongsGenius(df, len_df, sqlite_connection):
             song_lastfm = lfm_data["track"]["name"]
             artist_lastfm = lfm_data["track"]["artist"]["name"]
 
-            artist_lastfm = cleanString(artist_lastfm)
-            artist_spotify = cleanString(artist_spotify)
-            song_lastfm = cleanString(song_lastfm)
-            song = cleanString(song)
+            artist_lastfm = functions.cleanString(artist_lastfm)
+            artist_spotify = functions.cleanString(artist_spotify)
+            song_lastfm = functions.cleanString(song_lastfm)
+            song = functions.cleanString(song)
 
             # Get the distance between the artist name from lastFm and Genius 
-            similarity_artist = getMatchSimilarity(artist_lastfm, artist_spotify)["score"]
+            similarity_artist = functions.getMatchSimilarity(artist_lastfm, artist_spotify)["score"]
 
             # Get the distance between the song name from lastFm and Genius 
-            similarity_title = getMatchSimilarity(song_lastfm, song)["score"]
+            similarity_title = functions.getMatchSimilarity(song_lastfm, song)["score"]
 
             if similarity_artist < 1:
-                similarity_artist_2 = getMatchSimilarity(artist_lastfm, cleanString(artist_genius))["score"]
+                similarity_artist_2 = functions.getMatchSimilarity(artist_lastfm, functions.cleanString(artist_genius))["score"]
 
                 if similarity_artist_2 > similarity_artist:
                     similarity_artist = similarity_artist_2
@@ -303,14 +244,14 @@ def searchSongsGenius(df, len_df, sqlite_connection):
                     if "error" in lfm_data.keys():
                         continue
 
-                    song_lastfm_2 = cleanString(lfm_data_2["track"]["name"])
-                    artist_lastfm_2 = cleanString(lfm_data_2["track"]["artist"]["name"])
+                    song_lastfm_2 = functions.cleanString(lfm_data_2["track"]["name"])
+                    artist_lastfm_2 = functions.cleanString(lfm_data_2["track"]["artist"]["name"])
 
                     # Get the distance between the artist name from lastFm and Genius 
-                    similarity_artist_2 = getMatchSimilarity(artist_lastfm_2, artist_spotify)["score"]
+                    similarity_artist_2 = functions.getMatchSimilarity(artist_lastfm_2, artist_spotify)["score"]
 
                     # Get the distance between the song name from lastFm and Genius 
-                    similarity_title_2 = getMatchSimilarity(song_lastfm_2, song)["score"]
+                    similarity_title_2 = functions.getMatchSimilarity(song_lastfm_2, song)["score"]
 
                     if (similarity_title_2 >= similarity_title) and (similarity_artist_2 >= similarity_artist):
                         lfm_data = lfm_data_2
@@ -374,7 +315,7 @@ def main():
 
 
     df = pd.read_sql_query(f"SELECT * FROM {table_lastfm} WHERE songFound IS NULL OR songFound = 'False'", sqlite_connection)
-    len_df = len(df) 
+    len_df = 100
 
     logger.debug(f"Searching for songs on the LastFm database...")
     start = time.time()
@@ -384,7 +325,7 @@ def main():
 
     # Get time of search execution
     time_exec = time.time() - start
-    time_exec = secondsToStr(time_exec)
+    time_exec = functions.secondsToStr(time_exec)
 
     logger.success(f"Search completed successfully.")   
 
@@ -419,6 +360,10 @@ def main():
 
 
 if __name__ == "__main__":
+
+    genius = functions.getGenius()
+
+    user_agent, api_key = functions.getLastFm()
     
     # Start the application
     main()
