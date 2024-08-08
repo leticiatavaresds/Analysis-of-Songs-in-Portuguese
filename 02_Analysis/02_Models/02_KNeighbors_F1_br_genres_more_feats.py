@@ -38,6 +38,7 @@ import sys  # System-specific parameters and functions
 
 # Third-party library imports
 import pandas as pd  # Data manipulation and analysis
+import random # Random number generation and related operations 
 from loguru import logger  # Logging
 from sklearn.neighbors import KNeighborsClassifier # Machine learning classifier
 from sklearn.metrics import accuracy_score, classification_report  # Performance metrics
@@ -46,9 +47,13 @@ from sklearn.pipeline import Pipeline  # Pipeline for chaining steps
 from sklearn.preprocessing import LabelEncoder, StandardScaler  # Data preprocessing
 
 # Local application/library specific imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../functions')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../functions')))
 import analysis_functions
 from analysis_functions import folder_output
+
+# Set random seeds for reproducibility
+random.seed(42)
+os.environ['PYTHONHASHSEED'] = str(42)
 
 # Load data
 logger.info("Loading data...")

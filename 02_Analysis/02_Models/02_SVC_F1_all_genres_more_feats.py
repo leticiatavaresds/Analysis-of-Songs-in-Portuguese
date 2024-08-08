@@ -38,6 +38,7 @@ import sys  # System-specific parameters and functions
 
 # Third-party library imports
 import pandas as pd  # Data manipulation and analysis
+import random # Random number generation and related operations 
 from loguru import logger  # Logging
 
 from sklearn.model_selection import train_test_split, GridSearchCV, KFold  # Model selection
@@ -47,9 +48,13 @@ from sklearn.svm import LinearSVC  # Support Vector Classification
 from sklearn.multioutput import MultiOutputClassifier  # Multi-output classification
 
 # Local application/library specific imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../functions')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../functions')))
 import analysis_functions
 from analysis_functions import folder_output
+
+# Set random seeds for reproducibility
+random.seed(42)
+os.environ['PYTHONHASHSEED'] = str(42)
 
 # Load data
 logger.info("Loading data...")
@@ -73,13 +78,13 @@ def train_and_evaluate_linear_svc(X, y, feature_group_name, genres):
     # Define the pipeline
     pipeline = Pipeline([
         ('scaler', StandardScaler()),
-        ('model', MultiOutputClassifier(LinearSVC())),
+        ('model', LinearSVC(random_state=42)),
     ])
 
     # Define the hyperparameter grid
     param_grid = {
-        'model__estimator__C': [0.1, 0.5, 1.0, 2.0, 5.0],
-        'model__estimator__loss': ['squared_hinge'],
+        'model__C': [0.1, 0.5, 1.0, 2.0, 5.0],
+        'model__loss': ['squared_hinge']
     }
 
     # Perform grid search with cross-validation

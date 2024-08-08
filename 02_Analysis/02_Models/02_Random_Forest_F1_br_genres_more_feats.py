@@ -38,6 +38,7 @@ import sys  # System-specific parameters and functions
 # Third-party library imports
 import numpy as np  # Numerical operations
 import pandas as pd  # Data manipulation and analysis
+import random # Random number generation and related operations 
 from loguru import logger  # Logging
 from sklearn.model_selection import train_test_split, GridSearchCV, KFold  # Model selection
 from sklearn.preprocessing import StandardScaler
@@ -45,10 +46,14 @@ from sklearn.pipeline import Pipeline  # Pipeline for combining multiple steps
 from sklearn.ensemble import RandomForestClassifier  # Random forest classifier
 
 # Local application/library specific imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../functions')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../functions')))
 import analysis_functions
 from analysis_functions import folder_output
 
+# Set random seeds for reproducibility
+np.random.seed(42)
+random.seed(42)
+os.environ['PYTHONHASHSEED'] = str(42)
 
 # Load data
 logger.info("Loading data...")
@@ -87,15 +92,6 @@ def train_and_evaluate_rf(X, y, feature_group_name, genres):
                                 n_jobs=-1, verbose=2, return_train_score=True)
 
     grid_search.fit(X_train, y_train)
-
-    best_model = grid_search.best_estimator_
-    y_pred = best_model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-
-    # Use zero_division=1 to avoid warnings
-    report = classification_report(y_test, y_pred, zero_division=1, output_dict=True)
-    report_df = pd.DataFrame(report).transpose()
-    report_df.to_csv("teste.csv")
 
     # Get the best model
     logger.info("Grid search complete. Compiling results...")

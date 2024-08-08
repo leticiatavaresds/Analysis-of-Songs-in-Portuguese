@@ -41,7 +41,8 @@ import sys  # System-specific parameters and functions
 # Third-party library imports
 import numpy as np  # Numerical operations
 import pandas as pd  # Data manipulation and analysis
-import tensorflow  # Deep learning library
+import random # Random number generation and related operations 
+import tensorflow as tf # Deep learning library
 from loguru import logger  # Logging
 from sklearn.preprocessing import StandardScaler  # Data preprocessing
 from sklearn.model_selection import KFold  # Model selection
@@ -49,9 +50,14 @@ from sklearn.metrics import accuracy_score, f1_score  # Performance metrics
 
 
 # Local application/library specific imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../functions')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../functions')))
 import analysis_functions
 from analysis_functions import folder_output
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+tf.random.set_seed(42)
+random.seed(42)
 
 # Load data
 logger.info("Loading data...")
@@ -67,21 +73,20 @@ logger.info("Loading feature group model for artist...")
 feat_group_model = analysis_functions.dict_feature_group()
 
 def create_nn_model(dense_sizes=(32, 32), dropout_rate=0.1, input_shape=None, output_shape=None):
+    inp = tf.keras.layers.Input(shape=(input_shape,))
     
-    inp = tensorflow.keras.layers.Input(shape=(input_shape,))
-
     # Dense layers
     layer = inp
     for size in dense_sizes:
-        layer = tensorflow.keras.layers.Dense(size, activation="selu", kernel_initializer="lecun_normal")(layer)
-        layer = tensorflow.keras.layers.AlphaDropout(dropout_rate)(layer)
+        layer = tf.keras.layers.Dense(size, activation="selu", kernel_initializer="lecun_normal")(layer)
+        layer = tf.keras.layers.Dropout(dropout_rate)(layer)
 
     # Output layer
-    out = tensorflow.keras.layers.Dense(output_shape, activation="sigmoid")(layer)
-
+    out = tf.keras.layers.Dense(output_shape, activation="softmax")(layer)
+    
     # Create the model
-    model = tensorflow.keras.models.Model(inputs=inp, outputs=out)
-    model.compile(optimizer=tensorflow.keras.optimizers.Adam(), loss='binary_crossentropy', metrics=['accuracy'])
+    model = tf.keras.models.Model(inputs=inp, outputs=out)
+    model.compile(optimizer=tf.keras.optimizers.Adam(), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
     return model
 
 def train_and_evaluate_nn(X, y, feature_group_name, genres):
@@ -91,13 +96,16 @@ def train_and_evaluate_nn(X, y, feature_group_name, genres):
     genres = ",".join(str(element) for element in genres)
 
     # Parameters
-    dense_sizes_list = [(32, 32), (64, 64)]
+    dense_sizes_list = [(32, 32),(64, 64)]
     dropout_rates = [0.1]
     epochs = 50
-    batch_size = 2
+    batch_size = 32
 
     # Perform K-Fold cross-validation
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    # Determine the number of classes
+    output_shape = np.max(y) + 1
     
     for dense_sizes in dense_sizes_list:
         for dropout_rate in dropout_rates:
@@ -109,7 +117,7 @@ def train_and_evaluate_nn(X, y, feature_group_name, genres):
                 X_train, X_test = X[train_index], X[test_index]
                 y_train, y_test = y[train_index], y[test_index]
 
-                model = create_nn_model(dense_sizes=dense_sizes, dropout_rate=dropout_rate, input_shape=X.shape[1], output_shape=y.shape[1])
+                model = create_nn_model(dense_sizes=dense_sizes, dropout_rate=dropout_rate, input_shape=X.shape[1], output_shape = output_shape)
                 
                 # Normalize data
                 scaler = StandardScaler()
@@ -121,7 +129,7 @@ def train_and_evaluate_nn(X, y, feature_group_name, genres):
 
                 # Evaluate the model
                 y_pred = model.predict(X_test_scaled)
-                y_pred = (y_pred > 0.5).astype(int)
+                y_pred = np.argmax(y_pred, axis=1)
 
                 accuracy = accuracy_score(y_test, y_pred)
                 f1_micro = f1_score(y_test, y_pred, average='micro')
@@ -150,8 +158,8 @@ def train_and_evaluate_nn(X, y, feature_group_name, genres):
 
     results_df = pd.DataFrame(results)
     results_df['genre_labels'] = genres
+    
     logger.success("Results compiled into dataframe.")
-
     
     return results_df
 

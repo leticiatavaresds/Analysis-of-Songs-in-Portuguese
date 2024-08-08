@@ -251,16 +251,15 @@ def exec_model(function_model, df, genres, feat_group_model, model, with_vect = 
         DataFrame: The dataframe containing the results of the model evaluations.
     """
 
-    if len(genres) > 6:
-        df_tfidf, df_lda = get_tdfdf_lda_data("all_genres")
-    else:
-        df_tfidf, df_lda = get_tdfdf_lda_data("br_genres")
-
     # Filtrar e preparar os dados
     filtered_df = df.loc[df[genres].sum(axis=1) == 1].reset_index(drop=True)
 
-    if model == "Neural Network" or model == "SVC":
-        y_encoded = filtered_df[genres].values  # Convertendo para array NumPy
+    if model == "Neural Network":
+        print("OIEE")
+        import numpy as np
+        y = filtered_df[genres].values
+        y_encoded = np.argmax(y, axis=1)
+
     else:
         label_encoder = LabelEncoder()
         y = filtered_df[genres]
@@ -268,7 +267,7 @@ def exec_model(function_model, df, genres, feat_group_model, model, with_vect = 
         y_encoded = label_encoder.fit_transform(y)
 
 
-    # Avaliar o modelo manualmente
+
     # Prepare result DataFrame
     results_df = pd.DataFrame()
 
@@ -281,6 +280,12 @@ def exec_model(function_model, df, genres, feat_group_model, model, with_vect = 
         results_df = pd.concat([results_df, result_group], ignore_index=True)
 
     if(with_vect):
+
+        if len(genres) > 6:
+            df_tfidf, df_lda = get_tdfdf_lda_data("all_genres")
+        else:
+            df_tfidf, df_lda = get_tdfdf_lda_data("br_genres")
+
         #tfidf
         X = df_tfidf.values
         result_group = function_model(X, y_encoded, "tf-idf", genres)
@@ -326,7 +331,7 @@ def exec_model(function_model, df, genres, feat_group_model, model, with_vect = 
     # Order the DataFrame by results
     if "mean_test_f1_micro" in results_df.columns:
         results_df = results_df.sort_values(by='mean_test_f1_micro', ascending=False).reset_index(drop=True)
-        results_df = results_df[(results_df['rank_test_f1_macro'] == 1) | (results_df['rank_test_f1_micro'] == 1)].reset_index(drop=True)
+        # results_df = results_df[(results_df['rank_test_f1_macro'] == 1) | (results_df['rank_test_f1_micro'] == 1)].reset_index(drop=True)
 
     if "mean_test_score" in results_df.columns:
         results_df = results_df.sort_values(by='mean_test_score', ascending=False).reset_index(drop=True)

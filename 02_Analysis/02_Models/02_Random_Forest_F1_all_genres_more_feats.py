@@ -38,6 +38,7 @@ import sys  # System-specific parameters and functions
 # Third-party library imports
 import numpy as np  # Numerical operations
 import pandas as pd  # Data manipulation and analysis
+import random # Random number generation and related operations 
 from loguru import logger  # Logging
 from sklearn.model_selection import train_test_split, GridSearchCV, KFold  # Model selection
 from sklearn.preprocessing import StandardScaler
@@ -45,9 +46,14 @@ from sklearn.pipeline import Pipeline  # Pipeline for combining multiple steps
 from sklearn.ensemble import RandomForestClassifier  # Random forest classifier
 
 # Local application/library specific imports
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../functions')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), '../functions')))
 import analysis_functions
 from analysis_functions import folder_output
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+random.seed(42)
+os.environ['PYTHONHASHSEED'] = str(42)
 
 # Load data
 logger.info("Loading data...")
